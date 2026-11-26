@@ -8,9 +8,9 @@
 - Go 基线：`go.mod` 声明 Go 1.24（满足依赖最低要求）；Docker、CI 和发布工作流使用受支持的 Go 1.27.4。
 - 本机验证：Chrome 156.0.8078.80，CDP protocol 1.3；经本地 WebSocket 爬取本机 HTTP 页面，观察到并成功解码 `IPAddressSpace=Loopback`。
 - CLI 验证：通过 `--chrome-ws-url` 完成本地端到端任务，覆盖多目标聚合、robots/fuzz 路径、`curr_domain` 范围、站外请求观测及 POST 正文采集；修复 fetch hook 丢弃 `init` 参数的问题后通过。
-- Docker：运行镜像已迁移到 Ubuntu 24.04；Chrome for Testing 固定为 158.0.8127.88，并校验归档 SHA-256。CI 已加入镜像构建，并通过本机 HTTP fixture 运行 CLI 集成测试验证容器内 Chrome/CDP。
+- Docker：运行镜像已迁移到 Ubuntu 24.04；Chrome for Testing 固定为 158.0.8127.88，并校验归档 SHA-256。临时手动 Docker 工作流已成功构建镜像，并通过容器内 Chrome 对本机 HTTP fixture 执行 CLI WebSocket 集成测试（Actions run 45802160235）；验证后已移除该工作流。常规 Go CI 仍运行构建和测试。
 - `ClientNavigationReason` 的 `initialFrameNavigation`、`other` 由事件载荷回归测试覆盖；本机任务未声称一定会触发这两个值。
-- 尚未完成：没有本机 Docker/Podman，尚未实际运行新镜像构建；需等待手动 CI 执行。当前工作区没有生产 Chrome 清单，因此生产版本矩阵仍需部署环境验证。
+- 待部署环境确认：当前工作区没有生产 Chrome 清单，因此生产版本矩阵仍需部署环境验证。本机没有 Docker/Podman，容器镜像验证由 GitHub Actions 完成。
 
 ## 背景
 
@@ -59,7 +59,7 @@ chromedp 收到不可解码事件时记录错误并跳过该事件，事件循�
 1. 已在开发机启动本地 Chrome，绑定 `127.0.0.1` 调试地址并使用独立用户目录；通过 `--chrome-ws-url` 连接，并只记录浏览器产品版本和 CDP protocol，不记录完整 WebSocket 地址。
 2. 已使用本机 HTTP 测试页验证 WebSocket 导航、Loopback 响应事件及 CLI 结果；CLI 回归覆盖多目标聚合、robots/fuzz、范围过滤、浏览器观测请求和 POST 正文。新增 `ClientNavigationReason` 事件载荷测试，覆盖 `initialFrameNavigation` 和 `other`。
 3. 已升级 chromedp/cdproto，并修复新 `Network.Request` 用 `PostDataEntries` 表示请求体所需的兼容处理；已将 Go 构建工具链同步至受支持版本。
-4. 已运行完整 Go 测试及 Windows/Linux amd64 构建。Docker CI 会构建镜像，并用容器内 Chrome 运行 CLI 本地 WebSocket 集成回归；本机没有容器引擎，尚未本地执行该步骤。
+4. 已运行完整 Go 测试及 Windows/Linux amd64 构建。临时手动 Docker 工作流已通过镜像构建和容器内 Chrome 本地 WebSocket 集成回归（Actions run 45802160235），随后已移除；常规 Go CI 不自动构建 Docker 镜像。
 5. 生产环境 Chrome 支持范围和发布产物重建仍待部署环境验证。当前工作区不含生产 Chrome 清单；本机 CDP 集成验证仅覆盖 Chrome 156.0.8078.80，本地 Docker 镜像固定 Chrome for Testing 158.0.8127.88。
 
 本机可通过 Chrome 的 `--remote-debugging-port` 启动参数开启本地调试端口，然后用 PowerShell 动态读取 WebSocket 地址并运行集成测试。测试会拒绝非回环地址，且只输出 Chrome 产品版本与 CDP protocol：
