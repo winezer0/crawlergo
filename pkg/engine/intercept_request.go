@@ -20,7 +20,8 @@ import (
 	"github.com/chromedp/cdproto/network"
 )
 
-/**
+/*
+*
 处理每一个HTTP请求
 */
 func (tab *Tab) InterceptRequest(v *fetch.EventRequestPaused) {
@@ -36,7 +37,7 @@ func (tab *Tab) InterceptRequest(v *fetch.EventRequestPaused) {
 	}
 	_option := model2.Options{
 		Headers:  _req.Headers,
-		PostData: _req.PostData,
+		PostData: requestPostData(ctx, v.NetworkID, _req),
 	}
 	req := model2.GetRequest(_req.Method, url, _option)
 
@@ -72,14 +73,49 @@ func (tab *Tab) InterceptRequest(v *fetch.EventRequestPaused) {
 	_ = fetch.ContinueRequest(v.RequestID).Do(ctx)
 }
 
-/**
+func requestPostData(ctx context.Context, requestID network.RequestID, req *network.Request) string {
+	if req == nil {
+		return ""
+	}
+	if len(req.PostDataEntries) > 0 {
+		var body []byte
+		for _, entry := range req.PostDataEntries {
+			if entry == nil {
+				continue
+			}
+			part, err := base64.StdEncoding.DecodeString(entry.Bytes)
+			if err != nil {
+				logger.Logger.Debug("decode request post data entry failed: ", err)
+				body = nil
+				break
+			}
+			body = append(body, part...)
+		}
+		if body != nil {
+			return string(body)
+		}
+	}
+	if !req.HasPostData || requestID == "" {
+		return ""
+	}
+	postData, err := network.GetRequestPostData(requestID).Do(ctx)
+	if err != nil {
+		logger.Logger.Debug("get request post data failed: ", err)
+		return ""
+	}
+	return postData
+}
+
+/*
+*
 判断是否为导航请求
 */
 func (tab *Tab) IsNavigatorRequest(networkID string) bool {
 	return networkID == tab.LoaderID
 }
 
-/**
+/*
+*
 处理 401 407 认证弹窗
 */
 func (tab *Tab) HandleAuthRequired(req *fetch.EventAuthRequired) {
@@ -95,7 +131,8 @@ func (tab *Tab) HandleAuthRequired(req *fetch.EventAuthRequired) {
 	_ = fetch.ContinueWithAuth(req.RequestID, &authRes).Do(ctx)
 }
 
-/**
+/*
+*
 处理导航请求
 */
 func (tab *Tab) HandleNavigationReq(req *model2.Request, v *fetch.EventRequestPaused) {
@@ -156,7 +193,8 @@ func (tab *Tab) HandleNavigationReq(req *model2.Request, v *fetch.EventRequestPa
 	}
 }
 
-/**
+/*
+*
 处理Host绑定
 */
 func (tab *Tab) HandleHostBinding(req *model2.Request) {
@@ -189,7 +227,8 @@ func (tab *Tab) IsTopFrame(FrameID string) bool {
 	return FrameID == tab.TopFrameId
 }
 
-/**
+/*
+*
 解析响应内容中的URL 使用正则匹配
 */
 func (tab *Tab) ParseResponseURL(v *network.EventResponseReceived) {

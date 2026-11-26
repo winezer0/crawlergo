@@ -65,6 +65,8 @@ docker build . -t crawlergo
 docker run crawlergo http://testphp.vulnweb.com/
 ```
 
+The image currently targets `linux/amd64`, uses Ubuntu 24.04, and pins Chrome for Testing. When updating Chrome, update its version and SHA-256 together in `Dockerfile`.
+
 
 ### Using Proxy
 

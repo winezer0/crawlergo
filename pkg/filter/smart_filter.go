@@ -99,7 +99,7 @@ func NewSmartFilter(base *SimpleFilter, strictMode bool) *SmartFilter {
 func (s *SmartFilter) DoFilter(req *model.Request) bool {
 	// 首先过滤掉静态资源、基础的去重、过滤其它的域名
 	if s.SimpleFilter.DoFilter(req) {
-		logger.Logger.Debugf("filter req by simplefilter: " + req.URL.RequestURI())
+		logger.Logger.Debugf("filter req by simplefilter: %s", req.URL.RequestURI())
 		return true
 	}
 
@@ -118,7 +118,7 @@ func (s *SmartFilter) DoFilter(req *model.Request) bool {
 	// 对标记后的请求进行去重
 	uniqueId := req.Filter.UniqueId
 	if s.uniqueMarkedIds.Contains(uniqueId) {
-		logger.Logger.Debugf("filter req by uniqueMarkedIds 1: " + req.URL.RequestURI())
+		logger.Logger.Debugf("filter req by uniqueMarkedIds 1: %s", req.URL.RequestURI())
 		return true
 	}
 
@@ -145,7 +145,7 @@ func (s *SmartFilter) DoFilter(req *model.Request) bool {
 	// 新的ID再次去重
 	newUniqueId := req.Filter.UniqueId
 	if s.uniqueMarkedIds.Contains(newUniqueId) {
-		logger.Logger.Debugf("filter req by uniqueMarkedIds 2: " + req.URL.RequestURI())
+		logger.Logger.Debugf("filter req by uniqueMarkedIds 2: %s", req.URL.RequestURI())
 		return true
 	}
 

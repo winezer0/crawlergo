@@ -330,7 +330,7 @@ func (result *Result) appendInitialTargets(targets []*model.Request, requestFilt
 	var accepted []*model.Request
 	for _, req := range targets {
 		if requestFilter.DoFilter(req) {
-			logger.Logger.Debugf("filter req: " + req.URL.RequestURI())
+			logger.Logger.Debugf("filter req: %s", req.URL.RequestURI())
 			continue
 		}
 		accepted = append(accepted, req)

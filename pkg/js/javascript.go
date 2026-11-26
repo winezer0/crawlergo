@@ -80,9 +80,10 @@ const TabInitJS = `
 	}
 	
 	var oldFetch = window.fetch;
-	window.fetch = function(url) {
+	window.fetch = function(input) {
+		var url = input && typeof input === "object" && "url" in input ? input.url : input;
 		window.addLink(url, "Fetch");
-		return oldFetch(url);
+		return oldFetch.apply(this, arguments);
 	}
 	
 	// 锁定表单重置

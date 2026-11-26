@@ -1,0 +1,53 @@
+# Temporary Docker validation. Run only from the Actions UI; remove after validation.
+name: Temporary Docker Check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  docker-check:
+    name: Build image and test packaged Chrome
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.27.4'
+
+      - name: Build Docker image
+        run: docker build --pull --tag crawlergo:temp-check .
+
+      - name: Start packaged Chrome
+        shell: bash
+        run: |
+          docker run --detach --name crawlergo-cdp-chrome --network host \
+            --entrypoint /chrome/chrome crawlergo:temp-check \
+            --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
+            --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 \
+            --user-data-dir=/tmp/crawlergo-cdp-profile
+
+          version_json=""
+          for attempt in $(seq 1 30); do
+            version_json="$(curl --fail --silent http://127.0.0.1:9222/json/version || true)"
+            if [[ -n "$version_json" ]]; then
+              break
+            fi
+            sleep 1
+          done
+          if [[ -z "$version_json" ]]; then
+            echo "packaged Chrome did not expose its local CDP endpoint" >&2
+            exit 1
+          fi
+
+          websocket_url="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["webSocketDebuggerUrl"])' <<< "$version_json")"
+          echo "CRAWLERGO_CHROME_WS_URL=$websocket_url" >> "$GITHUB_ENV"
+
+      - name: Run CLI integration against packaged Chrome
+        run: go test ./cmd/crawlergo -run TestCLIWithLocalChromeWebSocket -count=1 -v
+
+      - name: Stop packaged Chrome
+        if: always()
+        run: docker rm --force crawlergo-cdp-chrome || true

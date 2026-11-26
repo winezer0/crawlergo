@@ -9,6 +9,7 @@ import (
 	"github.com/Qianlitp/crawlergo/pkg/logger"
 
 	"github.com/chromedp/cdproto/browser"
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
 )
 
@@ -74,6 +75,7 @@ func InitBrowser(chromiumPath string, extraHeaders map[string]interface{}, proxy
 		// not found chrome process need exit
 		logger.Logger.Fatal("chromedp run error: ", err.Error())
 	}
+	logBrowserVersion(bctx)
 	bro.Cancel = &cancel
 	bro.Ctx = &bctx
 	bro.ExtraHeaders = extraHeaders
@@ -92,11 +94,27 @@ func ConnectBrowser(wsUrl string, extraHeaders map[string]interface{}) *Browser 
 		// couldn't connect to the remote browser, need to exit
 		logger.Logger.Fatal("chromedp run error: ", err.Error())
 	}
+	logBrowserVersion(bctx)
 	bro.Cancel = &cancel
 	bro.Ctx = &bctx
 	bro.ExtraHeaders = extraHeaders
 
 	return &bro
+}
+
+func logBrowserVersion(ctx context.Context) {
+	chromedpContext := chromedp.FromContext(ctx)
+	if chromedpContext == nil || chromedpContext.Browser == nil {
+		logger.Logger.Warn("could not read Chrome/CDP version: browser context unavailable")
+		return
+	}
+	versionContext := cdp.WithExecutor(ctx, chromedpContext.Browser)
+	protocolVersion, product, _, _, _, err := browser.GetVersion().Do(versionContext)
+	if err != nil {
+		logger.Logger.Warn("could not read Chrome/CDP version: ", err)
+		return
+	}
+	logger.Logger.Infof("Chrome version %s, CDP protocol %s", product, protocolVersion)
 }
 
 func (bro *Browser) NewTab(timeout time.Duration) (*context.Context, context.CancelFunc) {
