@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -67,33 +68,62 @@ var (
 	pushProxyWG             sync.WaitGroup
 	outputJsonPath          string
 	logLevel                string
-	Version                 string
+	version                 = "dev"
 )
 
 func main() {
-	author := cli.Author{
-		Name:  "9ian1i",
-		Email: "9ian1itp@gmail.com",
-	}
-
 	//ignoreKeywords = cli.NewStringSlice(config.DefaultIgnoreKeywords...)
 	//customFormTypeValues = cli.NewStringSlice()
 	//customFormKeywordValues = cli.NewStringSlice()
 
-	app := &cli.App{
-		Name:      "crawlergo",
-		Usage:     "A powerful browser crawler for web vulnerability scanners",
-		UsageText: "crawlergo [global options] url1 [url2 ...]",
-		Version:   Version,
-		Authors:   []*cli.Author{&author},
-		Flags:     cliFlags,
-		Action:    run,
-	}
+	app := newApp()
+	cli.VersionPrinter = printVersion
 
 	err := app.Run(os.Args)
 	if err != nil {
 		logger.Logger.Fatal(err)
 	}
+}
+
+func newApp() *cli.App {
+	author := cli.Author{
+		Name:  "9ian1i",
+		Email: "9ian1itp@gmail.com",
+	}
+	return &cli.App{
+		Name:      "crawlergo",
+		Usage:     "A powerful browser crawler for web vulnerability scanners",
+		UsageText: "crawlergo [global options] url1 [url2 ...]",
+		Version:   version,
+		Authors:   []*cli.Author{&author},
+		Flags:     cliFlags,
+		Action:    run,
+	}
+}
+
+func printVersion(c *cli.Context) {
+	fmt.Fprintln(c.App.Writer, versionInfo())
+}
+
+func versionInfo() string {
+	return formatVersion(version, debug.ReadBuildInfo)
+}
+
+func formatVersion(version string, readBuildInfo func() (*debug.BuildInfo, bool)) string {
+	return fmt.Sprintf("%s (commit %s)", version, vcsTime(readBuildInfo))
+}
+
+func vcsTime(readBuildInfo func() (*debug.BuildInfo, bool)) string {
+	info, ok := readBuildInfo()
+	if !ok || info == nil {
+		return "unknown"
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.time" && setting.Value != "" {
+			return setting.Value
+		}
+	}
+	return "unknown"
 }
 
 func run(c *cli.Context) error {
