@@ -2,7 +2,7 @@
 
 ## 状态
 
-方案 A 已在本仓库实施并通过本机 Chrome/WebSocket 验证。生产环境支持的 Chrome 版本范围仍需按实际部署环境确认。
+方案 A 已在本仓库实施并通过本机 Chrome/WebSocket 验证。本方案不维护完整的生产 Chrome 版本矩阵，也不对外部 Chrome 设置统一硬性版本门槛；外部浏览器由部署方选择，兼容性按实际环境验证。
 
 - 依赖：`chromedp v0.14.2`、`cdproto v0.0.0-20250724212937-08a3db8b4327`。
 - Go 基线：`go.mod` 声明 Go 1.24（满足依赖最低要求）；Docker、CI 和发布工作流使用受支持的 Go 1.27.4。
@@ -10,7 +10,8 @@
 - CLI 验证：通过 `--chrome-ws-url` 完成本地端到端任务，覆盖多目标聚合、robots/fuzz 路径、`curr_domain` 范围、站外请求观测及 POST 正文采集；修复 fetch hook 丢弃 `init` 参数的问题后通过。
 - Docker：运行镜像已迁移到 Ubuntu 24.04；Chrome for Testing 固定为 158.0.8127.88，并校验归档 SHA-256。临时手动 Docker 工作流已成功构建镜像，并通过容器内 Chrome 对本机 HTTP fixture 执行 CLI WebSocket 集成测试（Actions run 45802160235）；验证后已移除该工作流。常规 Go CI 仍运行构建和测试。
 - `ClientNavigationReason` 的 `initialFrameNavigation`、`other` 由事件载荷回归测试覆盖；本机任务未声称一定会触发这两个值。
-- 待部署环境确认：当前工作区没有生产 Chrome 清单，因此生产版本矩阵仍需部署环境验证。本机没有 Docker/Podman，容器镜像验证由 GitHub Actions 完成。
+- 浏览器范围：当前验证覆盖本机 Chrome 156.0.8078.80 和 Docker 内 Chrome for Testing 158.0.8127.88；无需补全生产版本矩阵。本机没有 Docker/Podman，容器镜像验证由 GitHub Actions 完成。
+- 发布构建：已使用 Go 1.27.4 按发布工作流完成 Windows/Linux amd64 二进制交叉构建；未发布或上传 release 资产。
 
 ## 背景
 
@@ -27,7 +28,7 @@ chromedp 收到不可解码事件时记录错误并跳过该事件，事件循�
 
 ## 目标
 
-- 明确 CrawlerGo 支持的 Chrome、chromedp、cdproto 与 Go 版本组合。
+- 记录已验证的 Chrome、chromedp、cdproto 与 Go 版本组合，便于部署环境按需验证外部浏览器。
 - 使受支持的 Chrome 版本不再触发上述枚举解码错误。
 - 保持多目标、Scope、robots、fuzz 和聚合结果行为不变。
 - 不通过隐藏日志或忽略错误来假装事件已成功解码。
@@ -52,7 +53,7 @@ chromedp 收到不可解码事件时记录错误并跳过该事件，事件循�
 
 ### 推荐决策顺序
 
-本次采用方案 A：升级 chromedp/cdproto，并把 Go 基线明确为 1.24。开发机本地 Chrome/WebSocket 验证用于复现和回归；生产环境支持范围仍需从实际连接的浏览器会话读取版本信息后另行声明。不能仅凭可配置的 User-Agent 判断 CDP 版本。
+本次采用方案 A：升级 chromedp/cdproto，并把 Go 基线明确为 1.24。开发机本地 Chrome/WebSocket 验证用于复现和回归；生产环境使用外部浏览器时可按部署方需要验证实际会话版本，不维护统一版本矩阵。不能仅凭可配置的 User-Agent 判断 CDP 版本。
 
 ## 实施步骤
 
@@ -60,7 +61,7 @@ chromedp 收到不可解码事件时记录错误并跳过该事件，事件循�
 2. 已使用本机 HTTP 测试页验证 WebSocket 导航、Loopback 响应事件及 CLI 结果；CLI 回归覆盖多目标聚合、robots/fuzz、范围过滤、浏览器观测请求和 POST 正文。新增 `ClientNavigationReason` 事件载荷测试，覆盖 `initialFrameNavigation` 和 `other`。
 3. 已升级 chromedp/cdproto，并修复新 `Network.Request` 用 `PostDataEntries` 表示请求体所需的兼容处理；已将 Go 构建工具链同步至受支持版本。
 4. 已运行完整 Go 测试及 Windows/Linux amd64 构建。临时手动 Docker 工作流已通过镜像构建和容器内 Chrome 本地 WebSocket 集成回归（Actions run 45802160235），随后已移除；常规 Go CI 不自动构建 Docker 镜像。
-5. 生产环境 Chrome 支持范围和发布产物重建仍待部署环境验证。当前工作区不含生产 Chrome 清单；本机 CDP 集成验证仅覆盖 Chrome 156.0.8078.80，本地 Docker 镜像固定 Chrome for Testing 158.0.8127.88。
+5. 生产环境外部 Chrome 由部署方选择，本方案不维护完整版本矩阵。当前验证覆盖本机 Chrome 156.0.8078.80 和 Docker 内 Chrome for Testing 158.0.8127.88；已使用 Go 1.27.4 完成 Windows/Linux amd64 发布目标构建，尚未发布 release 资产。
 
 本机可通过 Chrome 的 `--remote-debugging-port` 启动参数开启本地调试端口，然后用 PowerShell 动态读取 WebSocket 地址并运行集成测试。测试会拒绝非回环地址，且只输出 Chrome 产品版本与 CDP protocol：
 
@@ -81,7 +82,7 @@ Remove-Item Env:CRAWLERGO_CHROME_WS_URL
 - 使用本机 Chrome、本地 WebSocket 地址和本机 HTTP 测试页完成真实浏览器任务；验证连接、页面访问和 Loopback 响应事件解码正常，且未出现上述枚举解码错误。
 - 对本机 Chrome 未实际触发的枚举，使用对应 CDP 事件载荷回归验证解码成功；未覆盖的枚举不得以“日志未出现”作为通过依据。
 - 验收记录包含浏览器产品版本和 CDP 协议版本，且不包含完整 WebSocket 地址、目标 URL 或请求头。
-- 明确生产支持的 Chrome 版本范围；本机验证只代表 Chrome 156.0.8078.80 及本地 WebSocket 连接路径。
+- 记录已验证的 Chrome 版本；无需为所有生产环境补齐完整 Chrome 版本矩阵。
 - CrawlerGo 完整测试 `go test ./...` 通过，Windows 与 Linux amd64 构建通过。
 - 多 URL 输入仍使用一个 CrawlerGo 进程并生成一份聚合结果。
 - `curr_domain`、`wild_domain`、`unlimit` 范围行为不变。
