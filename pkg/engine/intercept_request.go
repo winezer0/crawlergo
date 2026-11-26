@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
+	"mime"
 	"net/textproto"
 	"regexp"
 	"strconv"
@@ -18,7 +19,10 @@ import (
 	"github.com/Qianlitp/crawlergo/pkg/tools/requests"
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
+	html "golang.org/x/net/html"
 )
+
+var suspectURLRegex = regexp.MustCompile(config.SuspectURLRegex)
 
 /*
 *
@@ -52,7 +56,7 @@ func (tab *Tab) InterceptRequest(v *fetch.EventRequestPaused) {
 
 	// 静态资源 全部阻断
 	// https://github.com/Qianlitp/crawlergo/issues/106
-	if config.StaticSuffixSet.Contains(url.FileExt()) {
+	if isStaticRequest(v.ResourceType, url.FileExt()) {
 		_ = fetch.FailRequest(v.RequestID, network.ErrorReasonBlockedByClient).Do(ctx)
 		req.Source = config.FromStaticRes
 		tab.AddResultRequest(req)
@@ -71,6 +75,15 @@ func (tab *Tab) InterceptRequest(v *fetch.EventRequestPaused) {
 	req.Source = config.FromXHR
 	tab.AddResultRequest(req)
 	_ = fetch.ContinueRequest(v.RequestID).Do(ctx)
+}
+
+func isStaticRequest(resourceType network.ResourceType, fileExt string) bool {
+	switch resourceType {
+	case network.ResourceTypeStylesheet, network.ResourceTypeImage, network.ResourceTypeMedia, network.ResourceTypeFont, network.ResourceTypeTextTrack:
+		return true
+	default:
+		return config.StaticSuffixSet.Contains(fileExt)
+	}
 }
 
 func requestPostData(ctx context.Context, requestID network.RequestID, req *network.Request) string {
@@ -239,20 +252,123 @@ func (tab *Tab) ParseResponseURL(v *network.EventResponseReceived) {
 		logger.Logger.Debug("ParseResponseURL ", err)
 		return
 	}
-	resStr := string(res)
-
-	urlRegex := regexp.MustCompile(config.SuspectURLRegex)
-	urlList := urlRegex.FindAllString(resStr, -1)
-	for _, url := range urlList {
-
-		url = url[1 : len(url)-1]
-		url_lower := strings.ToLower(url)
-		if strings.HasPrefix(url_lower, "image/x-icon") || strings.HasPrefix(url_lower, "text/css") || strings.HasPrefix(url_lower, "text/javascript") {
-			continue
-		}
-
+	for _, url := range extractResponseURLs(string(res), v.Response.MimeType) {
 		tab.AddResultUrl(config.GET, url, config.FromJSFile)
 	}
+}
+
+func extractResponseURLs(body, responseMIME string) []string {
+	mediaType := normalizedResponseMIME(responseMIME)
+
+	var sources []string
+	switch mediaType {
+	case "text/html":
+		doc, err := html.Parse(strings.NewReader(body))
+		if err != nil {
+			return nil
+		}
+		sources = inlineScriptBodies(doc)
+	case "application/javascript", "text/javascript", "application/ecmascript", "text/ecmascript", "application/json":
+		sources = []string{body}
+	default:
+		return nil
+	}
+
+	var urls []string
+	for _, source := range sources {
+		for _, match := range suspectURLRegex.FindAllString(source, -1) {
+			candidate := strings.TrimSpace(match[1 : len(match)-1])
+			if isResponseURLCandidate(candidate) {
+				urls = append(urls, candidate)
+			}
+		}
+	}
+	return urls
+}
+
+func shouldParseResponseURLs(responseMIME string) bool {
+	switch normalizedResponseMIME(responseMIME) {
+	case "text/html", "application/javascript", "text/javascript", "application/ecmascript", "text/ecmascript", "application/json":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizedResponseMIME(responseMIME string) string {
+	mediaType, _, err := mime.ParseMediaType(responseMIME)
+	if err != nil {
+		return strings.ToLower(strings.TrimSpace(responseMIME))
+	}
+	return strings.ToLower(mediaType)
+}
+
+func inlineScriptBodies(node *html.Node) []string {
+	var scripts []string
+	var visit func(*html.Node)
+	visit = func(current *html.Node) {
+		if current.Type == html.ElementNode && current.Data == "script" {
+			hasSource := false
+			for _, attr := range current.Attr {
+				if attr.Key == "src" {
+					hasSource = true
+					break
+				}
+			}
+			if !hasSource {
+				for child := current.FirstChild; child != nil; child = child.NextSibling {
+					if child.Type == html.TextNode {
+						scripts = append(scripts, child.Data)
+					}
+				}
+			}
+			return
+		}
+		for child := current.FirstChild; child != nil; child = child.NextSibling {
+			visit(child)
+		}
+	}
+	visit(node)
+	return scripts
+}
+
+func isResponseURLCandidate(candidate string) bool {
+	if isMIMEType(candidate) || isDatePlaceholder(candidate) {
+		return false
+	}
+	return candidate != ""
+}
+
+func isMIMEType(candidate string) bool {
+	mediaType, _, err := mime.ParseMediaType(candidate)
+	if err != nil {
+		return false
+	}
+	topLevel, subtype, ok := strings.Cut(mediaType, "/")
+	if !ok || subtype == "" || strings.Contains(subtype, "/") {
+		return false
+	}
+	switch topLevel {
+	case "application", "audio", "font", "image", "message", "model", "multipart", "text", "video":
+		return true
+	default:
+		return false
+	}
+}
+
+func isDatePlaceholder(candidate string) bool {
+	parts := strings.Split(strings.Trim(candidate, "/"), "/")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		switch strings.ToLower(part) {
+		case "d", "dd", "m", "mm", "yy", "yyyy", "day", "month", "year":
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (tab *Tab) HandleRedirectionResp(v *network.EventResponseReceivedExtraInfo) {

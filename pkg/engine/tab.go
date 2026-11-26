@@ -37,6 +37,8 @@ type Tab struct {
 	PageBindings     map[string]interface{}
 	FoundRedirection bool
 	DocBodyNodeId    cdp.NodeID
+	domContentLoaded chan struct{}
+	domLoadedOnce    sync.Once
 	config           TabConfig
 
 	lock sync.Mutex
@@ -74,6 +76,7 @@ func NewTab(browser *Browser, navigateReq model2.Request, config TabConfig) *Tab
 	tab.ExtraHeaders = map[string]interface{}{}
 	var DOMContentLoadedRun = false
 	tab.Ctx, tab.Cancel = browser.NewTab(config.TabRunTimeout)
+	tab.domContentLoaded = make(chan struct{})
 	for key, value := range browser.ExtraHeaders {
 		navigateReq.Headers[key] = value
 		if key != "Host" {
@@ -103,7 +106,7 @@ func NewTab(browser *Browser, navigateReq model2.Request, config TabConfig) *Tab
 		// 解析HTML文档中的URL
 		// 查找当前页面的编码
 		case *network.EventResponseReceived:
-			if v.Response.MimeType == "application/javascript" || v.Response.MimeType == "text/html" || v.Response.MimeType == "application/json" {
+			if shouldParseResponseURLs(v.Response.MimeType) {
 				tab.WG.Add(1)
 				go tab.ParseResponseURL(v)
 			}
@@ -134,6 +137,7 @@ func NewTab(browser *Browser, navigateReq model2.Request, config TabConfig) *Tab
 			DOMContentLoadedRun = true
 			tab.WG.Add(1)
 			go tab.AfterDOMRun()
+			tab.domLoadedOnce.Do(func() { close(tab.domContentLoaded) })
 		// Loaded
 		case *page.EventLoadEventFired:
 			if DOMContentLoadedRun {
@@ -142,6 +146,7 @@ func NewTab(browser *Browser, navigateReq model2.Request, config TabConfig) *Tab
 			DOMContentLoadedRun = true
 			tab.WG.Add(1)
 			go tab.AfterDOMRun()
+			tab.domLoadedOnce.Do(func() { close(tab.domContentLoaded) })
 
 		// close Dialog
 		case *page.EventJavascriptDialogOpening:
@@ -184,14 +189,18 @@ func (tab *Tab) Start() {
 			}),
 			network.SetExtraHTTPHeaders(tab.ExtraHeaders),
 			// 执行导航
-			chromedp.Navigate(tab.NavigateReq.URL.String()),
+			chromedp.ActionFunc(tab.navigateUntilDOMContentLoaded),
 		}),
 	); err != nil {
 		if errors.Is(err, context.Canceled) {
 			logger.Logger.Debug("Crawling Canceled")
 			return
 		}
-		logger.Logger.Warn("navigate timeout ", tab.NavigateReq.URL.String())
+		if errors.Is(err, context.DeadlineExceeded) {
+			logger.Logger.Warnf("navigation timed out after %s for %s: %v", tab.config.DomContentLoadedTimeout, tab.NavigateReq.URL.String(), err)
+		} else {
+			logger.Logger.Warnf("navigation failed for %s: %v", tab.NavigateReq.URL.String(), err)
+		}
 	}
 
 	waitDone := func() <-chan struct{} {
@@ -228,10 +237,33 @@ func (tab *Tab) Start() {
 	// fmt.Println("Finished " + tab.NavigateReq.Method + " " + tab.NavigateReq.URL.String())
 }
 
-func RunWithTimeOut(ctx *context.Context, timeout time.Duration, tasks chromedp.Tasks) chromedp.ActionFunc {
+func (tab *Tab) navigateUntilDOMContentLoaded(ctx context.Context) error {
+	_, _, errorText, isDownload, err := page.Navigate(tab.NavigateReq.URL.String()).Do(ctx)
+	if err != nil {
+		return err
+	}
+	if isDownload {
+		return nil
+	}
+	if errorText != "" {
+		return fmt.Errorf("page load error %s", errorText)
+	}
+	return waitForDOMContentLoaded(ctx, tab.domContentLoaded)
+}
+
+func waitForDOMContentLoaded(ctx context.Context, domContentLoaded <-chan struct{}) error {
+	select {
+	case <-domContentLoaded:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func RunWithTimeOut(_ *context.Context, timeout time.Duration, tasks chromedp.Tasks) chromedp.ActionFunc {
 	return func(ctx context.Context) error {
-		timeoutContext, _ := context.WithTimeout(ctx, timeout)
-		//defer cancel()
+		timeoutContext, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
 		return tasks.Do(timeoutContext)
 	}
 }
