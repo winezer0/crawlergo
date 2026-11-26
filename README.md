@@ -104,8 +104,8 @@ if __name__ == '__main__':
 
 When the output mode is set to `json`, the returned result, after JSON deserialization, contains four parts:
 
-* `all_req_list`： All requests found during this crawl task, containing any resource type from other domains.
-* `req_list`：Returns the **current domain results** of this crawl task, pseudo-statically de-duplicated, without static resource links. It is a subset of `all_req_list `.
+* `all_req_list`： All requests observed by the browser during this crawl task, including resources from other domains. Input and path-expansion targets are included only if observed by the browser.
+* `req_list`：Returns the **in-scope crawl results** of this task after pseudo-static de-duplication, without static resource links. It contains accepted crawl targets and may include targets the browser did not observe; it is not guaranteed to be a subset of `all_req_list`.
 * `all_domain_list`：List of all domains found.
 * `sub_domain_list`：List of subdomains found.
 

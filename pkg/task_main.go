@@ -164,17 +164,7 @@ func (t *CrawlerTask) Run() {
 	t.Start = time.Now()
 	t.expandTargetPaths()
 
-	t.Result.AllReqList = t.Targets[:]
-
-	var initTasks []*model.Request
-	for _, req := range t.Targets {
-		if t.filter.DoFilter(req) {
-			logger.Logger.Debugf("filter req: " + req.URL.RequestURI())
-			continue
-		}
-		initTasks = append(initTasks, req)
-		t.Result.ReqList = append(t.Result.ReqList, req)
-	}
+	initTasks := t.Result.appendInitialTargets(t.Targets, t.filter)
 	logger.Logger.Info("filter repeat, target count: ", len(initTasks))
 
 	for _, req := range initTasks {
@@ -312,9 +302,7 @@ func (t *tabTask) Task() {
 	tab.Start()
 
 	// 收集结果
-	t.crawlerTask.Result.resultLock.Lock()
-	t.crawlerTask.Result.AllReqList = append(t.crawlerTask.Result.AllReqList, tab.ResultList...)
-	t.crawlerTask.Result.resultLock.Unlock()
+	t.crawlerTask.Result.recordObservedRequests(tab.ResultList)
 
 	for _, req := range tab.ResultList {
 		if !t.crawlerTask.filter.DoFilter(req) {
@@ -326,4 +314,27 @@ func (t *tabTask) Task() {
 			}
 		}
 	}
+}
+
+// recordObservedRequests keeps browser-observed requests separate from input and
+// path-expansion targets, which are only crawl candidates until the browser sees them.
+func (result *Result) recordObservedRequests(requests []*model.Request) {
+	result.resultLock.Lock()
+	result.AllReqList = append(result.AllReqList, requests...)
+	result.resultLock.Unlock()
+}
+
+// appendInitialTargets preserves accepted input targets in ReqList independently
+// of whether the browser later reports them as observed requests.
+func (result *Result) appendInitialTargets(targets []*model.Request, requestFilter filter2.FilterHandler) []*model.Request {
+	var accepted []*model.Request
+	for _, req := range targets {
+		if requestFilter.DoFilter(req) {
+			logger.Logger.Debugf("filter req: " + req.URL.RequestURI())
+			continue
+		}
+		accepted = append(accepted, req)
+		result.ReqList = append(result.ReqList, req)
+	}
+	return accepted
 }
