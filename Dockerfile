@@ -28,13 +28,26 @@ WORKDIR /
 
 COPY --from=build /app/bin/crawlergo /crawlergo
 COPY --from=build /app/latest/ /chrome/
-RUN apt-get update && apt-get install -y --no-install-recommends \
-     ca-certificates fonts-liberation libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 \
-     libcairo2 libcups2t64 libdbus-1-3 libdrm2 libexpat1 libfontconfig1 libgbm1 libgcc-s1 \
-     libglib2.0-0t64 libgtk-3-0t64 libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 \
-     libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 \
-     libxext6 libxfixes3 libxi6 libxinerama1 libxkbcommon0 libxrandr2 libxrender1 \
-     libxshmfence1 libxss1 libxtst6 \
-     && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+    install_runtime_dependencies() { \
+      apt-get install -y --no-install-recommends \
+        ca-certificates fonts-liberation libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 \
+        libcairo2 libcups2t64 libdbus-1-3 libdrm2 libexpat1 libfontconfig1 libgbm1 libgcc-s1 \
+        libglib2.0-0t64 libgtk-3-0t64 libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 \
+        libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 \
+        libxext6 libxfixes3 libxi6 libxinerama1 libxkbcommon0 libxrandr2 libxrender1 \
+        libxshmfence1 libxss1 libxtst6; \
+    }; \
+    apt-get update -o Acquire::Retries=3; \
+    attempt=1; \
+    while [ "$attempt" -le 3 ]; do \
+      if install_runtime_dependencies; then break; fi; \
+      if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+      echo "Runtime package installation failed; refreshing package indexes (attempt $attempt/3)." >&2; \
+      apt-get update -o Acquire::Retries=3; \
+      sleep "$attempt"; \
+      attempt=$((attempt + 1)); \
+    done; \
+    rm -rf /var/lib/apt/lists/*
 
 ENTRYPOINT ["/crawlergo", "-c", "/chrome/chrome"]
