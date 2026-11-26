@@ -14,6 +14,7 @@ var cliFlags = []cli.Flag{
 	SetPostData(),
 	SetMaxCrawledCount(),
 	SetFilterMod(),
+	SetScopeFilter(),
 	SetOutputMode(),
 	SetOutputJSON(),
 	//SetIgcognitoContext(),
@@ -93,6 +94,15 @@ func SetFilterMod() *cli.StringFlag {
 		Value:       "smart",
 		Usage:       "filtering `Mode` used for collected requests. Allowed mode:\"simple\", \"smart\" or \"strict\".",
 		Destination: &taskConfig.FilterMode,
+	}
+}
+
+func SetScopeFilter() *cli.StringFlag {
+	return &cli.StringFlag{
+		Name:        "scope-filter",
+		Value:       "curr_domain",
+		Usage:       "scope for collected requests: curr_domain, wild_domain or unlimit.",
+		Destination: &taskConfig.ScopeFilter,
 	}
 }
 

@@ -178,6 +178,7 @@ https://intoli.com/blog/not-possible-to-block-chrome-headless/chrome-headless-te
 * `--post-data PostData, -d PostData`   POST data. (Default: null)
 * `--max-crawled-count Number, -m Number`    The maximum number of tasks for crawlers to avoid long crawling time due to pseudo-static. (Default: 200)
 * `--filter-mode Mode, -f Mode`   Filtering mode, `simple`: only static resources and duplicate requests are filtered.  `smart`: with the ability to filter pseudo-static. `strict`: stricter pseudo-static filtering rules. (Default: smart)
+* `--scope-filter Mode`   Host scope for all input URLs: `curr_domain` allows each exact input host, `wild_domain` allows their registrable roots and subdomains, and `unlimit` allows any HTTP(S) host. (Default: curr_domain)
 * `--output-mode value, -o value`   Result output mode, `console`: print the glorified results directly to the screen. `json`: print the json serialized string of all results.  `none`: don't print the output. (Default: console)
 * `--output-json filepath` Write the result to the specified file after JSON serializing it. (Default: null)
 * `--request-proxy proxyAddress` socks5 proxy address, all network requests from crawlergo and chrome browser are sent through the proxy. (Default: null)
@@ -205,6 +206,8 @@ https://intoli.com/blog/not-possible-to-block-chrome-headless/chrome-headless-te
 * `--push-pool-max` The maximum number of concurrency when sending crawler results to the listening address. (Default: 10)
 * `--log-level` Logging levels, debug, info, warn, error and fatal. (Default: info)
 * `--no-headless`  Turn off chrome headless mode to visualize the crawling process. (Default: false)
+
+Multiple URLs can be passed as positional arguments to one crawler task. Their browser tabs, crawl limit and result set are shared, and discovered requests are filtered by `--scope-filter`.
 
 
 ## Follow me

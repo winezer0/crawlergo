@@ -5,6 +5,7 @@ import "time"
 type TaskConfig struct {
 	MaxCrawlCount           int    // 最大爬取的数量
 	FilterMode              string // simple、smart、strict
+	ScopeFilter             string // curr_domain、wild_domain、unlimit
 	ExtraHeaders            map[string]interface{}
 	ExtraHeadersString      string
 	AllDomainReturn         bool // 全部域名收集

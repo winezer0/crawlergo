@@ -2,6 +2,8 @@ package pkg
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 )
 
 type CrawlerTask struct {
+	RootDomains []string
 
 	Browser       *engine2.Browser     //
 	RootDomain    string               // 当前爬取根域名 用于子域名收集
@@ -27,7 +30,7 @@ type CrawlerTask struct {
 	taskWG        sync.WaitGroup       // 等待协程池所有任务结束
 	crawledCount  int                  // 爬取过的数量
 	taskCountLock sync.Mutex           // 已爬取的任务总数锁
-  Start         time.Time           //开始时间
+	Start         time.Time            //开始时间
 
 }
 
@@ -50,12 +53,26 @@ type tabTask struct {
 新建爬虫任务
 */
 func NewCrawlerTask(targets []*model.Request, taskConf TaskConfig) (*CrawlerTask, error) {
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("crawler task requires at least one target")
+	}
+	for _, target := range targets {
+		if target == nil || target.URL == nil {
+			return nil, fmt.Errorf("crawler task contains an invalid target")
+		}
+	}
+	if taskConf.ScopeFilter == "" {
+		taskConf.ScopeFilter = filter.ScopeFilterCurrDomain
+	}
 	crawlerTask := CrawlerTask{
 		Result: &Result{},
 		Config: &taskConf,
 	}
 
-	baseFilter := filter.NewSimpleFilter(targets[0].URL.Host)
+	baseFilter, err := filter.NewScopeFilter(targets, taskConf.ScopeFilter)
+	if err != nil {
+		return nil, err
+	}
 
 	if taskConf.FilterMode == config.SmartFilterMode {
 		crawlerTask.filter = filter.NewSmartFilter(baseFilter, false)
@@ -114,6 +131,7 @@ func NewCrawlerTask(targets []*model.Request, taskConf TaskConfig) (*CrawlerTask
 		crawlerTask.Browser = engine2.InitBrowser(taskConf.ChromiumPath, taskConf.ExtraHeaders, taskConf.Proxy, taskConf.NoHeadless)
 	}
 	crawlerTask.RootDomain = targets[0].URL.RootDomain()
+	crawlerTask.RootDomains = RootDomainsForTargets(targets)
 
 	// 创建协程池
 	p, _ := ants.NewPool(taskConf.MaxTabsCount)
@@ -144,23 +162,7 @@ func (t *CrawlerTask) Run() {
 	defer t.Browser.Close() // 关闭浏览器
 
 	t.Start = time.Now()
-	if t.Config.PathFromRobots {
-		reqsFromRobots := GetPathsFromRobots(*t.Targets[0])
-		logger.Logger.Info("get paths from robots.txt: ", len(reqsFromRobots))
-		t.Targets = append(t.Targets, reqsFromRobots...)
-	}
-
-	if t.Config.FuzzDictPath != "" {
-		if t.Config.PathByFuzz {
-			logger.Logger.Warn("`--fuzz-path` is ignored, using `--fuzz-path-dict` instead")
-		}
-		reqsByFuzz := GetPathsByFuzzDict(*t.Targets[0], t.Config.FuzzDictPath)
-		t.Targets = append(t.Targets, reqsByFuzz...)
-	} else if t.Config.PathByFuzz {
-		reqsByFuzz := GetPathsByFuzz(*t.Targets[0])
-		logger.Logger.Info("get paths by fuzzing: ", len(reqsByFuzz))
-		t.Targets = append(t.Targets, reqsByFuzz...)
-	}
+	t.expandTargetPaths()
 
 	t.Result.AllReqList = t.Targets[:]
 
@@ -198,7 +200,53 @@ func (t *CrawlerTask) Run() {
 	// 全部域名
 	t.Result.AllDomainList = AllDomainCollect(t.Result.AllReqList)
 	// 子域名
-	t.Result.SubDomainList = SubDomainCollect(t.Result.AllReqList, t.RootDomain)
+	t.Result.SubDomainList = SubDomainCollectForRoots(t.Result.AllReqList, t.RootDomains)
+}
+
+func (t *CrawlerTask) expandTargetPaths() {
+	seeds := uniqueOriginTargets(t.Targets)
+	var expanded []*model.Request
+	if t.Config.PathFromRobots {
+		for _, seed := range seeds {
+			expanded = append(expanded, GetPathsFromRobots(*seed)...)
+		}
+		logger.Logger.Info("get paths from robots.txt: ", len(expanded))
+	}
+
+	if t.Config.FuzzDictPath != "" {
+		if t.Config.PathByFuzz {
+			logger.Logger.Warn("`--fuzz-path` is ignored, using `--fuzz-path-dict` instead")
+		}
+		fuzzStart := len(expanded)
+		for _, seed := range seeds {
+			expanded = append(expanded, GetPathsByFuzzDict(*seed, t.Config.FuzzDictPath)...)
+		}
+		logger.Logger.Info("get paths by fuzzing: ", len(expanded)-fuzzStart)
+	} else if t.Config.PathByFuzz {
+		fuzzStart := len(expanded)
+		for _, seed := range seeds {
+			expanded = append(expanded, GetPathsByFuzz(*seed)...)
+		}
+		logger.Logger.Info("get paths by fuzzing: ", len(expanded)-fuzzStart)
+	}
+	t.Targets = append(t.Targets, expanded...)
+}
+
+func uniqueOriginTargets(targets []*model.Request) []*model.Request {
+	seen := make(map[string]struct{}, len(targets))
+	origins := make([]*model.Request, 0, len(targets))
+	for _, target := range targets {
+		if target == nil || target.URL == nil {
+			continue
+		}
+		key := strings.ToLower(target.URL.Scheme + "://" + target.URL.Host)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		origins = append(origins, target)
+	}
+	return origins
 }
 
 /*

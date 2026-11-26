@@ -83,7 +83,7 @@ func main() {
 	app := &cli.App{
 		Name:      "crawlergo",
 		Usage:     "A powerful browser crawler for web vulnerability scanners",
-		UsageText: "crawlergo [global options] url1 url2 url3 ... (must be same host)",
+		UsageText: "crawlergo [global options] url1 [url2 ...]",
 		Version:   Version,
 		Authors:   []*cli.Author{&author},
 		Flags:     cliFlags,
