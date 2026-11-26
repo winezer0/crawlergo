@@ -11,9 +11,6 @@ import (
 	model2 "github.com/Qianlitp/crawlergo/pkg/model"
 	"github.com/Qianlitp/crawlergo/pkg/tools"
 	"github.com/Qianlitp/crawlergo/pkg/tools/requests"
-
-	mapset "github.com/deckarep/golang-set"
-	"github.com/panjf2000/ants/v2"
 )
 
 const pathStr = "11/123/2017/2018/message/mis/model/abstract/account/act/action" +
@@ -36,10 +33,10 @@ const pathStr = "11/123/2017/2018/message/mis/model/abstract/account/act/action"
 	"/util/v1/v2/vendor/view/views/web/weixin/widgets/wm/wordpress/workspace/ws/www/www2/wwwroot/zone" +
 	"/admin/admin_bak/mobile/m/js"
 
-var pathFuzzWG sync.WaitGroup
-var validateUrl mapset.Set
+const fuzzConcurrency = 20
 
-/**
+/*
+*
 从robots.txt文件中获取路径信息
 */
 func GetPathsFromRobots(navReq model2.Request) []*model2.Request {
@@ -79,7 +76,8 @@ func GetPathsFromRobots(navReq model2.Request) []*model2.Request {
 	return result
 }
 
-/**
+/*
+*
 使用常见路径列表进行fuzz
 */
 func GetPathsByFuzz(navReq model2.Request) []*model2.Request {
@@ -88,7 +86,8 @@ func GetPathsByFuzz(navReq model2.Request) []*model2.Request {
 	return doFuzz(navReq, pathList)
 }
 
-/**
+/*
+*
 使用字典列表进行fuzz
 */
 func GetPathsByFuzzDict(navReq model2.Request, dictPath string) []*model2.Request {
@@ -99,34 +98,64 @@ func GetPathsByFuzzDict(navReq model2.Request, dictPath string) []*model2.Reques
 }
 
 type singleFuzz struct {
-	navReq model2.Request
-	path   string
+	navReq  model2.Request
+	path    string
+	results *fuzzResults
+}
+
+type fuzzResults struct {
+	mu   sync.Mutex
+	urls map[string]struct{}
+}
+
+func (results *fuzzResults) add(url string) {
+	results.mu.Lock()
+	results.urls[url] = struct{}{}
+	results.mu.Unlock()
+}
+
+func (results *fuzzResults) values() []string {
+	results.mu.Lock()
+	defer results.mu.Unlock()
+	urls := make([]string, 0, len(results.urls))
+	for url := range results.urls {
+		urls = append(urls, url)
+	}
+	return urls
 }
 
 func doFuzz(navReq model2.Request, pathList []string) []*model2.Request {
-	validateUrl = mapset.NewSet()
-	var result []*model2.Request
-	pool, _ := ants.NewPool(20)
-	defer pool.Release()
-	for _, path := range pathList {
-		path = strings.TrimPrefix(path, "/")
-		path = strings.TrimSuffix(path, "\n")
-		task := singleFuzz{
-			navReq: navReq,
-			path:   path,
-		}
-		pathFuzzWG.Add(1)
+	results := &fuzzResults{urls: make(map[string]struct{})}
+	tasks := make(chan singleFuzz)
+	workerCount := fuzzConcurrency
+	if len(pathList) < workerCount {
+		workerCount = len(pathList)
+	}
+	var workers sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		workers.Add(1)
 		go func() {
-			err := pool.Submit(task.doRequest)
-			if err != nil {
-				pathFuzzWG.Done()
+			defer workers.Done()
+			for task := range tasks {
+				task.doRequest()
 			}
 		}()
 	}
+	for _, path := range pathList {
+		path = strings.TrimSpace(path)
+		path = strings.TrimPrefix(path, "/")
+		task := singleFuzz{
+			navReq:  navReq,
+			path:    path,
+			results: results,
+		}
+		tasks <- task
+	}
+	close(tasks)
+	workers.Wait()
 
-	pathFuzzWG.Wait()
-	for _, _url := range validateUrl.ToSlice() {
-		_url := _url.(string)
+	var result []*model2.Request
+	for _, _url := range results.values() {
 		url, err := model2.GetUrl(_url)
 		if err != nil {
 			continue
@@ -138,12 +167,10 @@ func doFuzz(navReq model2.Request, pathList []string) []*model2.Request {
 	return result
 }
 
-/**
-
+/*
+*
  */
 func (s singleFuzz) doRequest() {
-	defer pathFuzzWG.Done()
-
 	url := fmt.Sprintf(`%s://%s/%s`, s.navReq.URL.Scheme, s.navReq.URL.Host, s.path)
 	resp, errs := requests.Get(url, tools.ConvertHeaders(s.navReq.Headers),
 		&requests.ReqOptions{Timeout: 2, AllowRedirect: false, Proxy: s.navReq.Proxy})
@@ -151,7 +178,7 @@ func (s singleFuzz) doRequest() {
 		return
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		validateUrl.Add(url)
+		s.results.add(url)
 	} else if resp.StatusCode == 301 {
 		locations := resp.Header["Location"]
 		if len(locations) == 0 {
@@ -163,7 +190,7 @@ func (s singleFuzz) doRequest() {
 			return
 		}
 		if redirectUrl.Host == s.navReq.URL.Host {
-			validateUrl.Add(url)
+			s.results.add(url)
 		}
 	}
 }
